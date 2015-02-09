@@ -7,11 +7,11 @@ from .idiokit.irc import connect as irc_connect
 
 class FIRCRelayBot(object):
 
-    def __init__(self, 
-        bot_name, 
+    def __init__(self,
+        bot_name,
         irc_server,
-        irc_port, 
-        irc_channel, 
+        irc_port,
+        irc_channel,
         irc_ssl,
         pipe_path):
 
@@ -40,18 +40,20 @@ class FIRCRelayBot(object):
 
         yield irc.join(self._channel)
         yield idiokit.pipe(self._read_pipe(), irc, idiokit.consume())
-    
+
     def stop(self):
         self._pipe.close()
         os.remove(self._pipe_path)
-     
+
     @idiokit.stream
     def _read_pipe(self):
         while True:
-            yield idiokit.select.select((self._pipe,), (), ()) 
-            line = self._pipe.readline()
+            yield idiokit.select.select((self._pipe,), (), ())
+            try:
+                line = self._pipe.readline()
+            except IOError as err:
+                yield idiokit.sleep(1)
+                continue
             if not line:
                 continue
             yield idiokit.send("PRIVMSG", self._channel, "{0}".format(line))
-     
-
