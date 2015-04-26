@@ -10,3 +10,7 @@ Usage:
     python -m fircrelay [arguments]
 
 **Word of caution:** Think twice what you send and where.
+
+## Notes
+
+Idiokit is an open source project from Codenomicon Ltd. and is MIT licenced. Licence is included in the module.
