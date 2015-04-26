@@ -55,5 +55,6 @@ class FIRCRelayBot(object):
                 yield idiokit.sleep(1)
                 continue
             if not line:
+                yield idiokit.sleep(0.5)
                 continue
             yield idiokit.send("PRIVMSG", self._channel, "{0}".format(line))
