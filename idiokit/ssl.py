@@ -7,7 +7,7 @@ import platform
 import contextlib
 import ssl as _ssl
 
-from . import idiokit, select, socket, timer
+from . import idiokit, select, socket, timer, threadpool
 
 
 class SSLError(socket.SocketError):
@@ -19,8 +19,16 @@ class SSLCertificateError(SSLError):
 
 
 PROTOCOL_SSLv23 = _ssl.PROTOCOL_SSLv23
-PROTOCOL_SSLv3 = _ssl.PROTOCOL_SSLv3
 PROTOCOL_TLSv1 = _ssl.PROTOCOL_TLSv1
+
+_names = [
+    "PROTOCOL_TLSv1_1",
+    "PROTOCOL_TLSv1_2"
+]
+for _name in _names:
+    if hasattr(_ssl, _name):
+        globals()[_name] = getattr(_ssl, _name)
+del _name, _names
 
 
 # A cert to make the ssl.wrap_socket to use the system CAs.
@@ -95,7 +103,7 @@ else:
 @idiokit.stream
 def _wrapped(ssl, timeout, func, *args, **keys):
     with socket.wrapped_socket_errors():
-        for _, timeout in socket.countdown(timeout):
+        for timeout in socket.countdown(timeout):
             try:
                 result = func(*args, **keys)
             except _ssl.SSLError as err:
@@ -114,13 +122,10 @@ def wrap_socket(sock,
                 keyfile=None,
                 certfile=None,
                 server_side=False,
-                ssl_version=None,
+                ssl_version=PROTOCOL_SSLv23,
                 require_cert=False,
                 ca_certs=None,
                 timeout=None):
-    if ssl_version is None:
-        ssl_version = PROTOCOL_SSLv23 if server_side else PROTOCOL_SSLv3
-
     keys = dict(
         keyfile=keyfile,
         certfile=certfile,
@@ -183,7 +188,7 @@ class _SSLSocket(object):
         offset = 0
         length = len(data)
 
-        for _, timeout in socket.countdown(timeout):
+        for timeout in socket.countdown(timeout):
             buf = buffer(data, offset, self.CHUNK_SIZE)
             bytes = yield _wrapped(self._ssl, timeout, self._ssl.write, buf)
 
@@ -192,7 +197,18 @@ class _SSLSocket(object):
                 break
 
     def fileno(self):
-        return self._ssl.fileno()
+        with socket.wrapped_socket_errors():
+            return self._ssl.fileno()
+
+    @idiokit.stream
+    def shutdown(self, how):
+        with socket.wrapped_socket_errors():
+            yield threadpool.thread(self._ssl.shutdown, how)
+
+    @idiokit.stream
+    def close(self):
+        with socket.wrapped_socket_errors():
+            yield threadpool.thread(self._ssl.close)
 
 
 def identities(cert):
@@ -318,8 +334,3 @@ def match_hostname(cert, hostname):
         id_string += " or " + repr(id_list[-1])
     message = "hostname {0!r} doesn't match {1}".format(hostname, id_string)
     raise SSLCertificateError(message)
-
-
-if __name__ == "__main__":
-    import doctest
-    doctest.testmod()

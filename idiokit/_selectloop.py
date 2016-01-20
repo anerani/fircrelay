@@ -140,26 +140,48 @@ class SelectLoop(object):
 
             if timeout != 0.0:
                 if self._pending:
-                    self._read(self._rfd, 1)
+                    while True:
+                        try:
+                            self._read(self._rfd, 1)
+                        except OSError as ose:
+                            if ose.errno != self._EINTR:
+                                raise ose
+                        else:
+                            break
+
                     self._pending = False
                 rfds.append(self._rfd)
         return rfds, wfds, xfds, timeout
 
     def _select(self, rfds, wfds, xfds, timeout):
         if timeout is not None and timeout <= 0.0 and not rfds and not wfds and not xfds:
-            return (), (), ()
+            return False, (), (), ()
 
         try:
             rfds, wfds, xfds = self._native_select(rfds, wfds, xfds, timeout)
-        except self._select_error as error:
-            if error.args[0] != self._EINTR:
-                raise error
-            return (), (), ()
+        except BaseException as exc:
+            if isinstance(exc, self._select_error) and exc.args[0] == self._EINTR:
+                return False, (), (), ()
+            rfds, wfds, xfds = self._collect_errors(rfds, wfds, xfds)
+            return True, rfds, wfds, xfds
 
-        return rfds, wfds, xfds
+        return False, rfds, wfds, xfds
 
-    def _process(self, rfds, wfds, xfds):
-        now = self._monotonic()
+    def _check_error(self, rfds=(), wfds=(), xfds=()):
+        try:
+            self._native_select(rfds, wfds, xfds, 0.0)
+        except:
+            return True
+        return False
+
+    def _collect_errors(self, rfds, wfds, xfds):
+        rfds_bad = tuple(x for x in rfds if self._check_error(rfds=(x,)))
+        wfds_bad = tuple(x for x in wfds if self._check_error(wfds=(x,)))
+        xfds_bad = tuple(x for x in xfds if self._check_error(xfds=(x,)))
+        return rfds_bad, wfds_bad, xfds_bad
+
+    def _process(self, has_errors, rfds, wfds, xfds):
+        now = None
         nodes = self._nodes
 
         with self._lock:
@@ -177,17 +199,22 @@ class SelectLoop(object):
 
             for node, (rfds, wfds, xfds) in nodes.iteritems():
                 func, args, keys = self._pop_node(node)
-                calls.append((func, (rfds, wfds, xfds) + args, keys))
+                calls.append((func, (has_errors, rfds, wfds, xfds) + args, keys))
 
             while self._heap:
                 timestamp, types, func, args, keys = self._heap.peek()
-                if timestamp > now:
+                if timestamp == self._INFINITY:
                     break
+                if timestamp > 0.0:
+                    if now is None:
+                        now = self._monotonic()
+                    if timestamp > now:
+                        break
 
                 if types is None:
                     calls.append((func, args, keys))
                 else:
-                    calls.append((func, ((), (), ()) + args, keys))
+                    calls.append((func, (False, (), (), ()) + args, keys))
                 self._pop_node(self._heap.head())
 
             self._immediate = self._calls
@@ -205,8 +232,8 @@ class SelectLoop(object):
 
     def iterate(self):
         rfds, wfds, xfds, timeout = self._prepare()
-        rfds, wfds, xfds = self._select(rfds, wfds, xfds, timeout)
-        calls = self._process(rfds, wfds, xfds)
+        has_errors, rfds, wfds, xfds = self._select(rfds, wfds, xfds, timeout)
+        calls = self._process(has_errors, rfds, wfds, xfds)
         self._perform(calls)
 
 global_select_loop = SelectLoop()

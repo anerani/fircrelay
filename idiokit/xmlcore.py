@@ -1,5 +1,85 @@
+import re
+import sys
 import xml.parsers.expat
 from xml.sax.saxutils import escape as _escape, quoteattr as _quoteattr
+
+
+if sys.maxunicode <= 65535:
+    _NON_XML_SAFE = re.compile(ur"^(?:[\ud800-\udbff][\udc00-\udfff]|[\u0009\u000a\u000d\u0020-\ud7ff\uE000-\uFFFD])*$", re.U)
+else:
+    _NON_XML_SAFE = re.compile(ur"^(?:[\U00010000-\U0010FFFF]|[\ud800-\udbff][\udc00-\udfff]|[\u0009\u000a\u000d\u0020-\ud7ff\uE000-\uFFFD])*$", re.U)
+
+
+def is_xml_safe(string):
+    r"""
+    Return True when the string contains only characters inside
+    the XML 1.0 character range, False otherwise.
+
+    >>> is_xml_safe("test")
+    True
+
+    >>> is_xml_safe("\x00")
+    False
+    """
+
+    return bool(_NON_XML_SAFE.match(string))
+
+
+class _XMLSafeUnicode(object):
+    r"""
+    A marker class that asserts to _to_xml_safe_unicode(...) that the contained
+    unicode value is XML safe and does not need to be checked.
+
+    >>> _to_xml_safe_unicode(_XMLSafeUnicode(u"test"))
+    u'test'
+
+    This class is an internal optimization (to allow ElementParser to skip
+    redundant checks when creating Element instances) and should not be
+    used nor referenced outside of this module.
+    """
+
+    __slots__ = ["value"]
+
+    def __init__(self, value):
+        self.value = value
+
+
+def _to_xml_safe_unicode(string):
+    r"""
+    Coerce the argument string into a unicode object that contains
+    only characters inside the XML 1.0 range.
+
+    >>> _to_xml_safe_unicode(u"unicode string")
+    u'unicode string'
+    >>> _to_xml_safe_unicode("byte string")
+    u'byte string'
+
+    Raise an UnicodeDecodeError when the argument is not a
+    unicode object and can not be decoded into one using the
+    ASCII encoding.
+
+    >>> _to_xml_safe_unicode("\xe4")
+    Traceback (most recent call last):
+        ...
+    UnicodeDecodeError: ...
+
+    Raise a ValueError when the argument contains characters
+    outside the XML 1.0 character range.
+
+    >>> _to_xml_safe_unicode("\x00")
+    Traceback (most recent call last):
+        ...
+    ValueError: string contains non-XML safe characters
+    """
+
+    if isinstance(string, _XMLSafeUnicode):
+        return string.value
+
+    string = unicode(string)
+    if not is_xml_safe(string):
+        raise ValueError("string contains non-XML safe characters")
+
+    return string
 
 
 class Elements(object):
@@ -58,7 +138,7 @@ def quoteattr(attr):
     _quoteattr_cache[attr] = value
     _quoteattr_cache_size += length
     return value
-_quoteattr_cache = dict()
+_quoteattr_cache = {}
 _quoteattr_cache_size = 0
 _quoteattr_cache_max_size = 2 ** 16
 
@@ -86,20 +166,44 @@ class Element(object):
             attrs = attrs.get(None, None)
         return None
 
+    @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        self._text = _to_xml_safe_unicode(value)
+
+    @property
+    def tail(self):
+        return self._tail
+
+    @tail.setter
+    def tail(self, value):
+        self._tail = _to_xml_safe_unicode(value)
+
     __slots__ = [
-        "_full_name", "_ns_name", "_name",
-        "text", "tail",
-        "_children", "_attrs"
+        "_full_name",
+        "_ns_name",
+        "_name",
+        "_text",
+        "_tail",
+        "_children",
+        "_attrs"
     ]
 
     def __init__(self, _name, _text=u"", _tail=u"", **keys):
+        _name = _to_xml_safe_unicode(_name)
+        _text = _to_xml_safe_unicode(_text)
+        _tail = _to_xml_safe_unicode(_tail)
+
         self._full_name = _name
         self._ns_name, self._name = namespace_split(_name)
-        self.text = _text
-        self.tail = _tail
+        self._text = _text
+        self._tail = _tail
 
         self._children = None
-        self._attrs = dict()
+        self._attrs = {}
         for key, value in keys.iteritems():
             self.set_attr(key, value)
 
@@ -146,8 +250,8 @@ class Element(object):
         return self._attrs[key]
 
     def set_attr(self, key, value):
-        key = unicode(key)
-        value = unicode(value)
+        key = _to_xml_safe_unicode(key)
+        value = _to_xml_safe_unicode(value)
         self._attrs[key] = value
 
     def __iter__(self):
@@ -206,42 +310,55 @@ class Element(object):
 
 class ElementParser(object):
     def __init__(self):
-        self.parser = xml.parsers.expat.ParserCreate("utf-8")
-        self.parser.StartElementHandler = self.start_element
-        self.parser.EndElementHandler = self.end_element
-        self.parser.CharacterDataHandler = self.char_data
+        self._parser = xml.parsers.expat.ParserCreate("utf-8")
+        self._parser.StartElementHandler = self.start_element
+        self._parser.EndElementHandler = self.end_element
+        self._parser.CharacterDataHandler = self.char_data
 
-        self.stack = list()
-        self.collected = list()
+        self._text = []
+        self._stack = []
+        self._collected = []
+
+    def _flush_text(self):
+        if not self._text:
+            return
+        text = _XMLSafeUnicode(u"".join(self._text))
+        self._text[:] = []
+
+        assert self._stack
+        current = self._stack[-1]
+        children = current._children
+        if children:
+            children[-1].tail = text
+        else:
+            current.text = text
 
     def start_element(self, name, attrs):
-        element = Element(name)
+        self._flush_text()
+
+        element = Element(_XMLSafeUnicode(name))
         for key, value in attrs.iteritems():
-            element.set_attr(key, value)
-        if self.stack:
-            self.stack[-1].add(element)
-        self.stack.append(element)
+            element.set_attr(_XMLSafeUnicode(key), _XMLSafeUnicode(value))
+
+        if self._stack:
+            self._stack[-1].add(element)
+        self._stack.append(element)
 
     def end_element(self, name):
-        current = self.stack.pop()
-        if len(self.stack) != 1:
-            return
-        last = self.stack[-1]._children.pop()
-        assert current is last
-        self.collected.append(current)
+        self._flush_text()
+
+        current = self._stack.pop()
+        if len(self._stack) == 1:
+            last = self._stack[-1]._children.pop()
+            assert current is last
+            self._collected.append(current)
 
     def char_data(self, data):
-        current = self.stack[-1]
-        if len(self.stack) == 1:
-            return
-        children = current._children
-        if not children:
-            current.text += data
-        else:
-            children[-1].tail += data
+        if len(self._stack) > 1:
+            self._text.append(data)
 
     def feed(self, data):
-        self.parser.Parse(data)
-        collected = Elements(*self.collected)
-        self.collected = list()
+        self._parser.Parse(data)
+        collected = Elements(*self._collected)
+        self._collected = list()
         return collected

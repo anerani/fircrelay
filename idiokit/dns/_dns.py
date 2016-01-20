@@ -1,3 +1,14 @@
+# Relevant specifications and other documents:
+#
+# [RFC 1304]: https://www.ietf.org/rfc/rfc1034.txt
+#     "DOMAIN NAMES - CONCEPTS AND FACILITIES"
+# [RFC 1035]: https://www.ietf.org/rfc/rfc1035.txt
+#     "DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION"
+# [RFC 1536]: https://www.ietf.org/rfc/rfc1536.txt
+#     "Common DNS Implementation Errors and Suggested Fixes"
+# [KRISTOFF]: https://www.cymru.com/jtk/misc/ephemeralports.html
+#     "Ephemeral Source Port Selection Strategies"
+
 from __future__ import absolute_import
 
 import struct
@@ -19,6 +30,18 @@ def gen_id():
 
 
 class _ReprMixin(object):
+    """
+    >>> class Foo(_ReprMixin):
+    ...     def __init__(self, bar):
+    ...         self._bar = bar
+    ...
+    ...     @property
+    ...     def bar(self):
+    ...         return self._bar
+    >>> Foo("baz")
+    Foo(bar='baz')
+    """
+
     def __repr__(self):
         keys = []
         for key, value in inspect.getmembers(type(self)):
@@ -107,6 +130,10 @@ class ResponseError(DNSError):
     @property
     def string(self):
         return self._string
+
+
+class NoData(DNSError):
+    pass
 
 
 class Message(_ReprMixin):
@@ -350,6 +377,20 @@ class Raw(object):
 
 
 class A(_ReprMixin):
+    r"""
+    >>> a = A("198.51.100.126")
+    >>> a.pack()
+    '\xc63d~'
+
+    >>> A.unpack(a.pack(), 0, len(a.pack()))
+    A(ip='198.51.100.126')
+
+    >>> A.unpack('abcdefg', 0, 1)
+    Traceback (most recent call last):
+    ...
+    MessageError: expected 4 bytes of RDATA, got 1
+    """
+
     code = 1
 
     @classmethod
@@ -372,6 +413,20 @@ RR.register_type(A)
 
 
 class AAAA(_ReprMixin):
+    r"""
+    >>> aaaa = AAAA("2001:db8::cafe")
+    >>> aaaa.pack()
+    ' \x01\r\xb8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xca\xfe'
+
+    >>> AAAA.unpack(aaaa.pack(), 0, len(aaaa.pack()))
+    AAAA(ip='2001:db8::cafe')
+
+    >>> AAAA.unpack('abcdefg', 0, 4)
+    Traceback (most recent call last):
+    ...
+    MessageError: expected 16 bytes of RDATA, got 4
+    """
+
     code = 28
 
     @classmethod
@@ -394,6 +449,17 @@ RR.register_type(AAAA)
 
 
 class TXT(_ReprMixin):
+    r"""
+    >>> txt = TXT(['test string', 'another test string'])
+
+    >>> packed = txt.pack()
+    >>> packed
+    '\x0btest string\x13another test string'
+
+    >>> TXT.unpack(packed, 0, len(packed))
+    TXT(strings=('test string', 'another test string'))
+    """
+
     code = 16
 
     @classmethod
@@ -434,6 +500,15 @@ RR.register_type(TXT)
 
 
 class PTR(_ReprMixin):
+    r"""
+    >>> ptr = PTR("ptr.test.idiokit.example").pack()
+    >>> ptr
+    '\x03ptr\x04test\x07idiokit\x07example\x00'
+
+    >>> PTR.unpack(ptr, 0, len(ptr))
+    PTR(name='ptr.test.idiokit.example')
+    """
+
     code = 12
 
     @classmethod
@@ -454,6 +529,15 @@ RR.register_type(PTR)
 
 
 class CNAME(_ReprMixin):
+    r"""
+    >>> cname = CNAME("cname.test.idiokit.example").pack()
+    >>> cname
+    '\x05cname\x04test\x07idiokit\x07example\x00'
+
+    >>> CNAME.unpack(cname, 0, len(cname))
+    CNAME(name='cname.test.idiokit.example')
+    """
+
     code = 5
 
     @classmethod
@@ -474,6 +558,20 @@ RR.register_type(CNAME)
 
 
 class SRV(_ReprMixin):
+    r"""
+    >>> priority = 10
+    >>> weight = 255
+    >>> port = 11
+    >>> target = "idiokit.example"
+
+    >>> srv = SRV(priority, weight, port, target).pack()
+    >>> srv
+    '\x00\n\x00\xff\x00\x0b\x07idiokit\x07example\x00'
+
+    >>> SRV.unpack(srv, 0, len(srv))
+    SRV(priority=10, weight=255, port=11, target='idiokit.example')
+    """
+
     code = 33
 
     _struct = struct.Struct("!HHH")
@@ -511,12 +609,75 @@ class SRV(_ReprMixin):
 RR.register_type(SRV)
 
 
+class MX(_ReprMixin):
+    r"""
+    >>> preference = 10
+    >>> exchange = "mx1.idiokit.example"
+
+    >>> mx = MX(preference, exchange).pack()
+    >>> mx
+    '\x00\n\x03mx1\x07idiokit\x07example\x00'
+
+    >>> MX.unpack(mx, 0, len(mx))
+    MX(preference=10, exchange='mx1.idiokit.example')
+
+    """
+
+    code = 15
+
+    _struct = struct.Struct("!H")
+
+    @classmethod
+    def unpack(cls, data, offset, length):
+        (preference,), offset = unpack(cls._struct, data, offset)
+        exchange, offset = unpack_name(data, offset)
+        return cls(preference, exchange)
+
+    def __init__(self, preference, exchange):
+        self._preference = preference
+        self._exchange = exchange
+
+    @property
+    def preference(self):
+        return self._preference
+
+    @property
+    def exchange(self):
+        return self._exchange
+
+    def pack(self):
+        return self._struct.pack(self._preference) + pack_name(self._exchange)
+RR.register_type(MX)
+
+
 def pack_name(name):
+    r"""
+    Return a domain name packed into the length-prefixed, zero byte terminated
+    format specified in [RFC 1035][] section 3.1.
+
+    >>> pack_name("a.bc")
+    '\x01a\x02bc\x00'
+
+    Limit the size of each label to 1-63 bytes, as shorter and longer labels can
+    not be expressed in this format. Also limit the total size of the packed name
+    to 255 bytes. Raise a ValueError for values violating these limits.
+    """
+
     result = []
     for piece in name.split("."):
-        result.append(chr(len(piece)))
+        length = len(piece)
+        if length == 0:
+            raise ValueError("zero length label")
+        elif length > 63:
+            raise ValueError("too long label ({0} bytes)".format(length))
+
+        result.append(chr(length))
         result.append(piece)
+
     result.append("\x00")
+    if sum(len(x) for x in result) > 255:
+        raise ValueError("too long name")
+
     return "".join(result)
 
 
@@ -663,6 +824,13 @@ class Resolver(object):
                 continue
 
             cname, answers = find_answers(result, question)
+            if not answers:
+                # [RFC 2616][] section 3:
+                # > Name servers sometimes return an authoritative NOERROR with no
+                # > ANSWER, AUTHORITY or ADDITIONAL records. This happens when the
+                # > queried name is valid but it does not have a record of the desired
+                # > type.
+                raise NoData("no data")
             idiokit.stop(cname, answers, (addr, port))
 
         raise DNSTimeout("DNS query timed out")
@@ -673,7 +841,7 @@ class Resolver(object):
         sock = socket.Socket(family, socket.SOCK_DGRAM)
         try:
             # Trust the platform's ephemeral source port generation method
-            # to adequately randomize the source port.
+            # to adequately randomize the source port. See [KRISTOFF].
             yield sock.sendto(query.pack(), (server_addr, server_port))
 
             while True:
@@ -735,9 +903,9 @@ class Resolver(object):
 
         other = msg.questions[0]
         return (
-            other.name == question.name
-            and other.type == question.type
-            and other.cls == question.cls
+            other.name == question.name and
+            other.type == question.type and
+            other.cls == question.cls
         )
 
 
@@ -782,7 +950,21 @@ def srv(name, resolver=None):
 
 
 def ordered_srv_records(srv_records):
-    # Implement server selection as described in RFC 2782.
+    """Implement server selection as described in RFC 2782.
+
+    >>> srv1 = SRV(30, 256, 7, "target3")
+    >>> srv2 = SRV(10, 65535, 7, "target1")
+    >>> srv3 = SRV(10, 1234, 7, "target2")
+    >>> srv_records = [srv1, srv2, srv3]
+
+    >>> result = list(ordered_srv_records(srv_records))
+
+    Sorting by weight is non-deterministic, so there's two correct
+    results (one more likely than other):
+
+    >>> result == [srv2, srv3, srv1] or result == [srv3, srv2, srv1]
+    True
+    """
 
     srv_records = tuple(srv_records)
     if len(srv_records) == 1 and srv_records[0].target == "":
@@ -825,13 +1007,6 @@ def ptr(name, resolver=None):
     idiokit.stop([x.data.name for x in answers])
 
 
-@idiokit.stream
-def cname(name, resolver=None):
-    resolver = _get_resolver(resolver)
-    _, answers, _ = yield resolver.query(name, CNAME.code)
-    idiokit.stop([x.data.name for x in answers])
-
-
 def reverse_lookup(ip, resolver=None):
     family, ip = parse_ip(ip)
     if family == _socket.AF_INET:
@@ -839,3 +1014,17 @@ def reverse_lookup(ip, resolver=None):
     else:
         name = reverse_ipv6(ip) + ".ip6.arpa"
     return ptr(name, resolver)
+
+
+@idiokit.stream
+def cname(name, resolver=None):
+    resolver = _get_resolver(resolver)
+    _, answers, _ = yield resolver.query(name, CNAME.code)
+    idiokit.stop([x.data.name for x in answers])
+
+
+@idiokit.stream
+def mx(name, resolver=None):
+    resolver = _get_resolver(resolver)
+    _, answers, _ = yield resolver.query(name, MX.code)
+    idiokit.stop([x.data for x in answers])
