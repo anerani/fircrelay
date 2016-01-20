@@ -7,13 +7,15 @@ from .idiokit.irc import connect as irc_connect
 
 class FIRCRelayBot(object):
 
-    def __init__(self,
+    def __init__(
+        self,
         bot_name,
         irc_server,
         irc_port,
         irc_channel,
         irc_ssl,
-        pipe_path):
+        pipe_path
+    ):
 
         self._name = bot_name
         self._channel = irc_channel
@@ -23,7 +25,7 @@ class FIRCRelayBot(object):
         self._pipe_path = pipe_path
 
         try:
-            os.mkfifo(pipe_path, 0600)
+            os.mkfifo(self._pipe_path, "0600")
         except OSError as err:
             print "Failed to open FIFO pipe ({0!r})".format(err)
             sys.exit(1)
@@ -36,7 +38,12 @@ class FIRCRelayBot(object):
 
     @idiokit.stream
     def _execute(self):
-        irc = yield irc_connect(self._server, self._port, self._name, self._ssl)
+        irc = yield irc_connect(
+            self._server,
+            self._port,
+            self._name,
+            self._ssl
+        )
 
         yield irc.join(self._channel)
         yield idiokit.pipe(self._read_pipe(), irc, idiokit.consume())
