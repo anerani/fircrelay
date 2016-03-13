@@ -1,8 +1,7 @@
 import os
 import sys
 
-from . import idiokit
-from .idiokit.irc import connect as irc_connect
+from idiokit.irc import connect as irc_connect
 
 
 class FIRCRelayBot(object):
