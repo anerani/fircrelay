@@ -1,7 +1,7 @@
 # fircrelay
 FIFO (named pipe) to IRC Relay Bot
 
-FIFO to IRC Relay Bot is meant to create a named pipe file which the bot will then listen to, and relays all messages arrived to that pipe to a specified IRC channel. You could e.g. dump some basic logs to your private IRC using this.
+FIFO to IRC Relay Bot is meant to create a named pipe file which the bot will then listen to, and relays all messages arrived to that pipe to a specified IRC channel. You could e.g. dump some basic logs to your private IRC using this. Works on Unix platforms due to ```os.mkfifo()``` limitations.
 
 Bot requires ```idiokit``` package, from which the bot uses modules for IRC connectivity and asynchronous stuff. Package can be found [here.](https://github.com/abusesa/idiokit/)
 
@@ -17,6 +17,8 @@ List of things that might come in hand to send to an IRC channel:
 
 * Logwatch dumps
 * Generic (non-spamming) logs
+
+It is also recommended to set up a separate user with limited privileges to read the socket file.
 
 ### About Idiokit
 
