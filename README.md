@@ -11,6 +11,13 @@ Usage:
 
 **Word of caution:** Think twice what you send and where.
 
-## Notes
+### Tips
 
-Idiokit is an open source project from Codenomicon Ltd. and is MIT licenced. Licence is included in the module.
+List of things that might come in hand to send to an IRC channel:
+
+* Logwatch dumps
+* Generic (non-spamming) logs
+
+### About Idiokit
+
+Idiokit is an open source project from Codenomicon Ltd. and is MIT licenced.
