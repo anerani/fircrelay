@@ -5,11 +5,44 @@ FIFO to IRC Relay Bot is meant to create a named pipe file which the bot will th
 
 Bot requires ```idiokit``` package, from which the bot uses modules for IRC connectivity and asynchronous stuff. Package can be found [here.](https://github.com/abusesa/idiokit/)
 
-Usage:
+### Install
 
-    python -m fircrelay [arguments]
+```bash
+$ git clone https://github.com/anerani/fircrelay.git
+$ cd fircrelay
 
-**Word of caution:** Think twice what you send and where.
+# optionally install to current-user only
+$ python setup.py install --user
+
+# or system-wide
+$ python setup.py install
+```
+
+### Usage
+
+```bash
+$ python -m fircrelay -h
+
+usage: __main__.py [-h] -s SERVER [-n NICK] -p PORT -c CHANNEL
+                   [-X {True,False}] [-f PIPE_FILE]
+
+File pipe to IRC echobot.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -s SERVER, --server SERVER
+                        server address
+  -n NICK, --nick NICK  nickname
+  -p PORT, --port PORT  irc server port number
+  -c CHANNEL, --channel CHANNEL
+                        channel to join
+  -X {True,False}, --irc-ssl {True,False}
+                        use SSL (default: True)
+  -f PIPE_FILE, --pipefile PIPE_FILE
+                        path and filename to create the pipe to read from
+```
+
+**Word of caution:** Think twice what you send and where, and who has what permissions to the file socket.
 
 ### Tips
 
