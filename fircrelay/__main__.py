@@ -1,7 +1,7 @@
 import os
 import argparse
 
-from .fircrelaybot import FIRCRelayBot
+from fircrelay.bot import FIRCRelayBot
 
 if __name__ == "__main__":
 
